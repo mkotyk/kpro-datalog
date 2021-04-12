@@ -1,0 +1,69 @@
+package com.psyndicate.kprodatalog
+
+import com.psyndicate.kprodatalog.serialization.decode
+import com.psyndicate.kprodatalog.serialization.encode
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Test
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+internal class KManagerDatalogHeaderTest {
+    private val sampleHeaderEncoded = listOf(
+        0x4B, 0x46, 0x4C, 0x41, 0x53, 0x48, 0x75, 0x02, 0x00, 0x00, 0x50, 0x01,
+        0x00, 0x00, 0x23, 0x04, 0x40, 0x00, 0x00, 0x00, 0xD5, 0x33, 0x64, 0x87,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    ).map { it.toByte() }.toByteArray()
+
+    private val sampleHeaderData = KManagerDatalogHeader(
+        numberOfFrames = 629,
+        dataFrameSize = 336,
+        unknown1 = 1059,
+        unknown2 = 64,
+        unknown3 = 13269,
+        durationMs = 34660
+    )
+
+    @Test
+    fun `test serialize header`() {
+        val byteBuffer = ByteBuffer.allocate(sampleHeaderEncoded.size).order(ByteOrder.LITTLE_ENDIAN)
+        byteBuffer.encode(sampleHeaderData)
+
+        assertArrayEquals(sampleHeaderEncoded, byteBuffer.array())
+    }
+
+    @Test
+    fun `test deserialize header`() {
+        val result: KManagerDatalogHeader =
+            ByteBuffer.wrap(sampleHeaderEncoded)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .decode()
+
+        assertArrayEquals(sampleHeaderData.id, result.id)
+        assertEquals(sampleHeaderData.numberOfFrames, result.numberOfFrames)
+        assertEquals(sampleHeaderData.dataFrameSize, result.dataFrameSize)
+        assertEquals(sampleHeaderData.unknown1, result.unknown1)
+        assertEquals(sampleHeaderData.unknown2, result.unknown2)
+        assertEquals(sampleHeaderData.unknown3, result.unknown3)
+        assertEquals(sampleHeaderData.durationMs, result.durationMs)
+        assertArrayEquals(sampleHeaderData.unknown4, result.unknown4)
+    }
+
+    @Test
+    fun `test header size constant matches serialized size`() {
+        val byteBuffer = ByteBuffer.allocate(sampleHeaderEncoded.size).order(ByteOrder.LITTLE_ENDIAN)
+        byteBuffer.encode(sampleHeaderData)
+
+        assertEquals(KManagerDatalogHeader.SIZE, byteBuffer.array().size)
+    }
+}
