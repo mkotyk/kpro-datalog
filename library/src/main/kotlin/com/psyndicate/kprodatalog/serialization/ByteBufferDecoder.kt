@@ -28,7 +28,7 @@ fun <T : Any> ByteBuffer.decode(klass: KClass<T>): T {
             Int::class.createType() -> getInt()
             Short::class.createType() -> getShort()
             Byte::class.createType() -> get()
-            Boolean::class.createType() -> get()
+            Boolean::class.createType() -> get().toInt() != 0
             UInt::class.createType() -> getInt().toUInt()
             UShort::class.createType() -> getShort().toUShort()
             UByte::class.createType() -> get().toUByte()

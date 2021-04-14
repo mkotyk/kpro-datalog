@@ -13,7 +13,6 @@ repositories {
 dependencies {
     implementation(project(":library"))
     implementation(files("libs/javax-usb3-1.4.0.jar"))
-    implementation(files("libs/usb3-ftdi-1.3.0.jar"))
     implementation("org.jetbrains.kotlinx:kotlinx-cli:0.3.1")
     implementation("com.github.ajalt.mordant:mordant:2.0.0-beta1")
     implementation(kotlin("stdlib-jdk8"))

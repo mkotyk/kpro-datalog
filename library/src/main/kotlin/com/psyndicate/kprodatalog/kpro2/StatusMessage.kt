@@ -8,7 +8,7 @@ data class StatusMessage(
     val unknowns1: ByteArray = ByteArray(13),
     val online: Boolean,
     @SerializedSize(15)
-    val unknowns2: ByteArray = ByteArray(14),
+    val unknowns2: ByteArray = ByteArray(15),
 ) : Message {
     override val size:Int get() = 29
 }
