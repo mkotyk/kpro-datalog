@@ -4,7 +4,7 @@ import com.psyndicate.kprodatalog.KManagerDatalogFrame
 import com.psyndicate.kprodatalog.KManagerDatalogHeader
 import com.psyndicate.kprodatalog.kpro2.*
 import com.psyndicate.kprodatalog.serialization.decode
-import org.junit.Assert.*
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -187,7 +187,7 @@ internal class DatalogTests {
                 val constructedValue = property.getter.call(frame.constructedKdlFrame) as Number
 
                 val maxDifference = when (property) {
-                    KManagerDatalogFrame::ECT -> 0.1 // This value isn't tuned perfectly
+                    KManagerDatalogFrame::ECT -> 1.0 // This value isn't tuned perfectly
                     KManagerDatalogFrame::tps2 -> 0.1
                     else -> 0.0001
                 }
@@ -195,5 +195,79 @@ internal class DatalogTests {
                 assertSame(property.name, kdlValue, constructedValue, maxDifference)
             }
         }
+    }
+
+    @Test
+    fun `test show ect correlation`() {
+        // ECT sensor curve
+        // 12k = -20C
+        // 5.0k = 0C
+        // 2.0k = 20C
+        // 1.2k = 40C
+        // 0.7k = 60C
+        // 0.4K = 80C
+        // 0.2K = 100C
+        // 0.1K = 120C
+
+        val dataFrames = loadTestData()
+        setOf(
+            255 to -20.00,
+            179 to 13.00,
+            0 to 120.0
+        ).union(
+            dataFrames.mapNotNull {
+                if (it.message is Datalog2Message) {
+                    it.message.ECT.toInt() to it.kdlFrame.ECT
+                } else {
+                    null
+                }
+            })
+            //.map { ((256 - it.first) / 2.2) - 22 to it.second }
+            .distinctBy { it.first }
+            .sortedBy { it.first }
+            .forEach { println("${it.first} ${it.second} ${it.first.toDouble().ectTempConversion}") }
+    }
+
+    @Test
+    fun `test hondata temp correction curve`() {
+        val dataFrames = loadTestData()
+
+        val corrections = mapOf(
+            /* deg C to percent */
+            -21.55 to 10.99853515625,
+            31.64 to 4.998779296875,
+            86.196875 to 0,
+            175.4 to -5.999755859375,
+            208.4 to -7.9986572265625,
+        )
+
+        fun tryConvert(input: Double): Double {
+            val approxTemp = ((255.0 - input) / 1.8214 - 23)
+            val correction = approxTemp.polyConvert(
+                listOf(
+                    8.4488203635012571e+000,
+                    -1.1508603827469159e-001,
+                    1.7656775114223509e-004,
+                    4.3539420121624008e-007,
+                    -2.1599082393997798e-009
+                )
+            )
+            return approxTemp - (approxTemp * correction / 100)
+        }
+        setOf(
+            255 to -20.00,
+            179 to 13.00,
+            0 to 120.0
+        ).union(
+            dataFrames.mapNotNull {
+                if (it.message is Datalog2Message) {
+                    it.message.ECT.toInt() to it.kdlFrame.ECT
+                } else {
+                    null
+                }
+            })
+            .distinctBy { it.first }
+            .sortedBy { it.first }
+            .forEach { println("${it.first} ${it.second} ${tryConvert(it.first.toDouble())}") }
     }
 }

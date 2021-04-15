@@ -28,7 +28,11 @@ data class Datalog3Message(
     @SerializedSize(20)
     val diagnosticCodes: ByteArray = ByteArray(20)
 ) : Message {
-    override val size: Int get() = 22
+    companion object {
+        const val MSG_SIZE = 22
+    }
+
+    override val size: Int get() = MSG_SIZE
 }
 
 @ExperimentalUnsignedTypes

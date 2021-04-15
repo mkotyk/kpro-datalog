@@ -1,9 +1,8 @@
 package com.psyndicate.kprodatalog.utility
 
+import com.ftdi.FTDevice
 import com.psyndicate.kprodatalog.KManagerDatalogFrame
 import com.psyndicate.kprodatalog.KManagerDatalogHeader
-import com.psyndicate.kprodatalog.ftdi.FTDI
-import com.psyndicate.kprodatalog.ftdi.FlowControl
 import com.psyndicate.kprodatalog.kpro2.*
 import com.psyndicate.kprodatalog.serialization.decode
 import com.psyndicate.kprodatalog.serialization.encode
@@ -20,22 +19,25 @@ import java.nio.ByteOrder
 import kotlin.system.exitProcess
 
 class DatalogTool(private val quiet: Boolean = false) : Closeable {
-    private val ftdiDevice: FTDI
+    private val ftdiDevice: FTDevice
     private val KPRO_PRODUCT_ID = 0xF5F8
 
     init {
-        val devices = FTDI.findFTDIDevices(productIds = listOf(KPRO_PRODUCT_ID))
-        if (!devices.iterator().hasNext()) {
+        FTDevice.setVIDPID(0x0403, KPRO_PRODUCT_ID)
+        val devs = FTDevice.getDevices(true)
+        ftdiDevice = FTDevice.getDevices(true).find {
+            println("Found 0x%04x 0x%04x".format(it.devID shr 16, it.devID and 0xFFFF))
+            it.devID == (0x403 shl 16) + KPRO_PRODUCT_ID
+        } ?: let {
             println("No suitable USB Serial devices found.")
             exitProcess(1)
         }
-        val usbDevice = devices.iterator().next()
 
-        println("Using: ${usbDevice.deviceId}")
-        ftdiDevice = FTDI(usbDevice)
-        ftdiDevice.setBaudRate(115200)
-        ftdiDevice.setLatencyTimer(5)
-        ftdiDevice.setFlowControl(FlowControl.RTS_CTS_HS)
+        ftdiDevice.open()
+        println(ftdiDevice.devDescription)
+        //ftdiDevice.setResetPipeRetryCount(10)
+        ftdiDevice.setTimeouts(100, 100)
+        ftdiDevice.latencyTimer = 5
     }
 
     fun replay(datalogInputStream: InputStream) {
@@ -114,29 +116,34 @@ class DatalogTool(private val quiet: Boolean = false) : Closeable {
                 if (now > data.nextPollTime && data.condition(online)) {
                     messagePollTimes[msgType]?.nextPollTime = now + data.intervalMs
                     try {
-                        ftdiDevice.purgeRx()
-                        ftdiDevice.purgeTx()
+                        ftdiDevice.purgeBuffer(true, true)
                         ftdiDevice.outputStream.write(msgType.id.toInt())
+
+                        val expectedReadSize = when (msgType) {
+                            MessageType.Status -> StatusMessage.MSG_SIZE
+                            MessageType.Datalog1 -> Datalog1Message.MSG_SIZE
+                            MessageType.Datalog2 -> Datalog2Message.MSG_SIZE
+                            MessageType.Datalog3 -> Datalog3Message.MSG_SIZE
+                        } + 3 // (Type, length, checksum bytes)
+
+                        val buffer = ByteArray(expectedReadSize)
+                        val bytesRead = ftdiDevice.inputStream.read(buffer)
+                        if (expectedReadSize - bytesRead > 2) {
+                            println("Short read for $msgType.  Expected $expectedReadSize, got $bytesRead")
+                        }
+
+                        val msgType = buffer[0]
+                        val msgLength = buffer[1].toInt()
+                        val cksum = buffer.map { it.toUByte() }.sum().toInt() and 0xFF
+
                         //println("Message id: 0x%02X".format(msgType.id.toInt()))
-
-                        val msgType = ftdiDevice.inputStream.read()
                         //println("Message type: 0x%02x".format(msgType))
-                        val msgLength = ftdiDevice.inputStream.read()
                         //println("Message length: %d".format(msgLength))
-
-                        val msgData = ByteArray(msgLength).also {
-                            ftdiDevice.inputStream.read(it)
+                        if (0 != cksum) {
+                            println("Error: Calculated checksum and message checksum do not match: $cksum != 0 for $msgType")
                         }
 
-                        val msgChecksum = ftdiDevice.inputStream.read()
-                        //println("Message Checksum: %d".format(msgChecksum))
-                        val cksum = checksum(msgType, msgLength, msgData)
-                        if (0 != cksum + msgChecksum) {
-                          //  println("Error: Calculated checksum and message checksum do not match: $cksum != 0 for $msgType")
-                            // TODO: Datalogs do not check  correctly
-                        }
-
-                        val messageByteBuffer = ByteBuffer.wrap(msgData).order(ByteOrder.LITTLE_ENDIAN)
+                        val messageByteBuffer = ByteBuffer.wrap(buffer, 2, msgLength).order(ByteOrder.LITTLE_ENDIAN)
                         when (msgType.toByte()) {
                             MessageType.Status.id -> {
                                 val statusMessage = messageByteBuffer.decode<StatusMessage>()
@@ -150,9 +157,11 @@ class DatalogTool(private val quiet: Boolean = false) : Closeable {
                                 runningFrame = newFrame
                             }
                             MessageType.Datalog2.id -> {
+                                val msg = messageByteBuffer.decode<Datalog2Message>()
                                 val newFrame = runningFrame
-                                    .apply(messageByteBuffer.decode<Datalog2Message>())
+                                    .apply(msg)
                                     .copy(frameNumber = frameNumber++, timeOffset = (now - startTime).toInt())
+                                println("ECT: %03d -> %5.5f".format(msg.ECT.toInt(), newFrame.ECT))
                                 recordedFrames.add(newFrame)
                                 runningFrame = newFrame
 
@@ -166,7 +175,8 @@ class DatalogTool(private val quiet: Boolean = false) : Closeable {
                             }
                         }
                     } catch (ex: Exception) {
-                        println("Not ready ${ex.message}")
+                        ex.printStackTrace()
+                        ftdiDevice.resetDevice()
                         Thread.sleep(5000)
                         return@forEach
                     }
@@ -207,7 +217,16 @@ class DatalogTool(private val quiet: Boolean = false) : Closeable {
     private fun displayFrame(frame: KManagerDatalogFrame) {
         with(frame) {
             print("#%08d  %08dms ".format(frameNumber, timeOffset))
-            print("RPM: %4d  VSS: %4f  GEAR: %1d MAP: %2.2f IGN: %2f INJ: %3f ".format(RPM, speed, gear, map, ignition, injectorDuration))
+            print(
+                "RPM: %4d  VSS: %4f  GEAR: %1d MAP: %2.2f IGN: %2f INJ: %3f ".format(
+                    RPM,
+                    speed,
+                    gear,
+                    map,
+                    ignition,
+                    injectorDuration
+                )
+            )
             print("IAT: %3.2f\u00B0C ECT: %3.2f\u00B0C BAT: %2.1f".format(IAT, ECT, batteryVoltage))
             print("\r")
         }

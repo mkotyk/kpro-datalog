@@ -313,9 +313,11 @@ data class Datalog1Message(
         const val N2O_3_ARM = 0x01
         const val N2O_3_ON = 0x02
         const val DATALOGGING_ACTIVE = 0x04
+
+        const val MSG_SIZE = 45
     }
 
-    override val size: Int get() = 45
+    override val size: Int get() = MSG_SIZE
 }
 
 @ExperimentalUnsignedTypes

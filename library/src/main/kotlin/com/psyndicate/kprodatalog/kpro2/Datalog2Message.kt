@@ -71,9 +71,11 @@ data class Datalog2Message(
         const val KPRO_OPEN_COLD = 1
         const val KPRO_CLOSED = 2
         const val KPRO_OPEN_DRIVING = 4
+
+        const val MSG_SIZE = 9
     }
 
-    override val size: Int get() = 9
+    override val size: Int get() = MSG_SIZE
 }
 
 @ExperimentalUnsignedTypes

@@ -10,5 +10,8 @@ data class StatusMessage(
     @SerializedSize(15)
     val unknowns2: ByteArray = ByteArray(15),
 ) : Message {
-    override val size:Int get() = 29
+    companion object {
+        const val MSG_SIZE = 29
+    }
+    override val size:Int get() = MSG_SIZE
 }
