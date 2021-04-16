@@ -22,16 +22,26 @@ class DatalogTool(private val quiet: Boolean = false) : Closeable {
     private val ftdiDevice: FTDevice
     private val KPRO_PRODUCT_ID = 0xF5F8
 
+    /**
+     * usb 1-1: new full-speed USB device number 11 using xhci_hcd
+     * usb 1-1: New USB device found, idVendor=0403, idProduct=f5f8, bcdDevice= 4.00
+     * usb 1-1: New USB device strings: Mfr=1, Product=2, SerialNumber=3
+     * usb 1-1: Product: Hondata K-Series ECU
+     * usb 1-1: Manufacturer: Hondata, Inc
+     * usb 1-1: SerialNumber: HD1000
+     */
+
     init {
         FTDevice.setVIDPID(0x0403, KPRO_PRODUCT_ID)
-        val devs = FTDevice.getDevices(true)
-        ftdiDevice = FTDevice.getDevices(true).find {
-            println("Found 0x%04x 0x%04x".format(it.devID shr 16, it.devID and 0xFFFF))
-            it.devID == (0x403 shl 16) + KPRO_PRODUCT_ID
-        } ?: let {
-            println("No suitable USB Serial devices found.")
-            exitProcess(1)
-        }
+        ftdiDevice = FTDevice.getDevices().firstOrNull()
+//        .find {
+//            println("Found 0x%04x 0x%04x".format(it.devID shr 16, it.devID and 0xFFFF))
+//            it.devID == (0x403 shl 16) + KPRO_PRODUCT_ID
+//        }
+            ?: let {
+                println("No suitable USB Serial devices found.")
+                exitProcess(1)
+            }
 
         ftdiDevice.open()
         println(ftdiDevice.devDescription)
@@ -41,50 +51,84 @@ class DatalogTool(private val quiet: Boolean = false) : Closeable {
     }
 
     fun replay(datalogInputStream: InputStream) {
+        ftdiDevice.setBaudRate(9600)
         datalogInputStream.use { dataInput ->
             val headerByteBuffer = ByteBuffer
                 .wrap(dataInput.readNBytes(KManagerDatalogHeader.SIZE))
                 .order(ByteOrder.LITTLE_ENDIAN)
             val header: KManagerDatalogHeader = headerByteBuffer.decode()
-            val startTime = System.currentTimeMillis()
-            for (index in 0 until header.numberOfFrames) {
-                val frameByteBuffer = ByteBuffer
-                    .wrap(dataInput.readNBytes(header.dataFrameSize))
-                    .order(ByteOrder.LITTLE_ENDIAN)
-                val frame: KManagerDatalogFrame = frameByteBuffer.decode()
-
+            var datalogStartTime: Long? = null
+            var nextTime = 0L
+            var frame = KManagerDatalogFrame()
+            while (true) {
                 val now = System.currentTimeMillis()
-                val timeDelta = startTime + frame.timeOffset - now
-                if (timeDelta > 0) {
-                    Thread.sleep(timeDelta)
+                if (datalogStartTime != null && now > nextTime) {
+                    val frameByteBuffer = ByteBuffer
+                        .wrap(dataInput.readNBytes(header.dataFrameSize))
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                    frame = frameByteBuffer.decode<KManagerDatalogFrame>().also {
+                        nextTime = datalogStartTime!! + it.timeOffset
+                        if (it.frameNumber >= header.numberOfFrames) {
+                            return@replay
+                        }
+                    }
                 }
-
-                if (!quiet) {
-                    displayFrame(frame)
-                }
-
-                val request = ftdiDevice.inputStream.read()
-                if (request >= 0) {
-                    val message = when (request.toByte()) {
-                        MessageType.Status.id -> StatusMessage(online = true)
-                        MessageType.Datalog1.id -> frame.toDatalog1Message()
-                        MessageType.Datalog2.id -> frame.toDatalog2Message()
-                        MessageType.Datalog3.id -> frame.toDatalog3Message()
+                val request = ftdiDevice.read()
+                if (request > 0) {
+                    when (request.toByte()) {
+                        MessageType.Status.id -> {
+                            ByteBuffer
+                                .allocate(StatusMessage.MSG_SIZE + 3)
+                                .order(ByteOrder.LITTLE_ENDIAN)
+                                .put(request.toByte())
+                                .put(StatusMessage.MSG_SIZE.toByte())
+                                .encode(StatusMessage(online = true))
+                        }
+                        MessageType.Datalog1.id -> {
+                            if (datalogStartTime == null) {
+                                datalogStartTime = now
+                            }
+                            ByteBuffer
+                                .allocate(Datalog1Message.MSG_SIZE + 3)
+                                .order(ByteOrder.LITTLE_ENDIAN)
+                                .put(request.toByte())
+                                .put(Datalog1Message.MSG_SIZE.toByte())
+                                .encode(frame.toDatalog1Message())
+                        }
+                        MessageType.Datalog2.id -> {
+                            if (datalogStartTime == null) {
+                                datalogStartTime = now
+                            }
+                            ByteBuffer
+                                .allocate(Datalog2Message.MSG_SIZE + 3)
+                                .order(ByteOrder.LITTLE_ENDIAN)
+                                .put(request.toByte())
+                                .put(Datalog2Message.MSG_SIZE.toByte())
+                                .encode(frame.toDatalog2Message())
+                        }
+                        MessageType.Datalog3.id -> {
+                            if (datalogStartTime == null) {
+                                datalogStartTime = now
+                            }
+                            ByteBuffer
+                                .allocate(Datalog3Message.MSG_SIZE + 3)
+                                .order(ByteOrder.LITTLE_ENDIAN)
+                                .put(request.toByte())
+                                .put(Datalog3Message.MSG_SIZE.toByte())
+                                .encode(frame.toDatalog3Message())
+                        }
                         else -> {
                             println("Requested unknown message type [$request]")
                             null
                         }
+                    }?.let { msg ->
+                        val msgArray = msg.array()
+                        msgArray[msgArray.size - 1] = (-msgArray.checksum(0, msgArray.size - 1)).toByte()
+                        ftdiDevice.outputStream.write(msgArray)
                     }
 
-                    message?.let { msg ->
-                        val msgBuffer = ByteBuffer
-                            .allocate(msg.size + 3)
-                            .order(ByteOrder.LITTLE_ENDIAN)
-                            .put(request.toByte())
-                            .put(msg.size.toByte())
-                            .encode(msg)
-                        msgBuffer.put((msgBuffer.array().checksum(0, msg.size + 2)).toByte())
-                        ftdiDevice.outputStream.write(msgBuffer.array())
+                    if (!quiet && datalogStartTime != null) {
+                        displayFrame(frame)
                     }
                 }
             }
@@ -112,14 +156,14 @@ class DatalogTool(private val quiet: Boolean = false) : Closeable {
                 break
             }
 
-            messagePollTimes.forEach { msgType, data ->
+            messagePollTimes.forEach { pollMsgType, data ->
                 if (now > data.nextPollTime && data.condition(online)) {
-                    messagePollTimes[msgType]?.nextPollTime = now + data.intervalMs
+                    messagePollTimes[pollMsgType]?.nextPollTime = now + data.intervalMs
                     try {
                         ftdiDevice.purgeBuffer(true, true)
-                        ftdiDevice.outputStream.write(msgType.id.toInt())
+                        ftdiDevice.outputStream.write(pollMsgType.id.toInt())
 
-                        val expectedReadSize = when (msgType) {
+                        val expectedReadSize = when (pollMsgType) {
                             MessageType.Status -> StatusMessage.MSG_SIZE
                             MessageType.Datalog1 -> Datalog1Message.MSG_SIZE
                             MessageType.Datalog2 -> Datalog2Message.MSG_SIZE
@@ -129,22 +173,22 @@ class DatalogTool(private val quiet: Boolean = false) : Closeable {
                         val buffer = ByteArray(expectedReadSize)
                         val bytesRead = ftdiDevice.inputStream.read(buffer)
                         if (expectedReadSize - bytesRead > 2) {
-                            println("Short read for $msgType.  Expected $expectedReadSize, got $bytesRead")
+                            println("Short read for $pollMsgType.  Expected $expectedReadSize, got $bytesRead")
                         }
 
                         val msgType = buffer[0]
                         val msgLength = buffer[1].toInt()
-                        val cksum = buffer.map { it.toUByte() }.sum().toInt() and 0xFF
+                        val msgCksum = buffer.map { it.toUByte() }.sum().toInt() and 0xFF
 
                         //println("Message id: 0x%02X".format(msgType.id.toInt()))
                         //println("Message type: 0x%02x".format(msgType))
                         //println("Message length: %d".format(msgLength))
-                        if (0 != cksum) {
-                            println("Error: Calculated checksum and message checksum do not match: $cksum != 0 for $msgType")
+                        if (0 != msgCksum) {
+                            println("Error: Calculated checksum and message checksum do not match: $msgCksum != 0 for $msgType")
                         }
 
                         val messageByteBuffer = ByteBuffer.wrap(buffer, 2, msgLength).order(ByteOrder.LITTLE_ENDIAN)
-                        when (msgType.toByte()) {
+                        when (msgType) {
                             MessageType.Status.id -> {
                                 val statusMessage = messageByteBuffer.decode<StatusMessage>()
                                 online = statusMessage.online
@@ -232,7 +276,8 @@ class DatalogTool(private val quiet: Boolean = false) : Closeable {
         }
     }
 
-    private fun ByteArray.checksum(offset: Int, length: Int): Int = this.drop(offset).take(length).sum() and 0xFF
+    private fun ByteArray.checksum(offset: Int = 0, length: Int = this.size - offset): Int =
+        this.drop(offset).take(length).sum() and 0xFF
 
     override fun close() {
         ftdiDevice.close()
