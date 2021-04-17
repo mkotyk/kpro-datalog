@@ -12,36 +12,25 @@ data class StatusMessage(
     val ecuSoftwareVersionMinor: Byte = 0x31,
     val ecuSoftwareVersionMajor: Byte = 0x12,
     val ecuType: Byte = 0x3,
-    @SerializedSize(4)
-    val unknowns1: ByteArray = byteArrayOf(
-        0xFAu.toByte(),
-        0xEDu.toByte(),
-        0x30,
-        0x66
-    ),
+    val ecuChecksum: Int = 0,
     val online: Boolean,
-    @SerializedSize(15)
+    // Firmware ok?
+    // ECU security enabled?
+    @SerializedSize(3)
     val unknowns2: ByteArray = byteArrayOf(
         0x01,
         0x00,
-        0x00,
-        0x90u.toByte(),
-        0x5E,
-        0x00,
-        0x00,
-        0xF4u.toByte(),
-        0x0A,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
         0x00
-    )
+    ),
+    val statsNumSectorsRead: Int = 24208,
+    val statsNumSectorsWritten: Int = 2804,
+    val statsNumSectorsError: Int = 0,
+    override var checksum: Byte = 0
 ) : Message {
     companion object {
-        const val MSG_SIZE = 29
+        const val MSG_SIZE = 30
     }
 
     override val size: Int get() = MSG_SIZE
+    override val id: Byte get() = MessageType.Status.id
 }

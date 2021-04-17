@@ -26,13 +26,16 @@ data class Datalog3Message(
         Conversion: Straight copy of 20 (14h) bytes
      */
     @SerializedSize(20)
-    val diagnosticCodes: ByteArray = ByteArray(20)
+    val diagnosticCodes: ByteArray = ByteArray(20),
+
+    override var checksum: Byte = 0
 ) : Message {
     companion object {
-        const val MSG_SIZE = 22
+        const val MSG_SIZE = 23
     }
 
     override val size: Int get() = MSG_SIZE
+    override val id: Byte get() = MessageType.Datalog3.id
 }
 
 @ExperimentalUnsignedTypes

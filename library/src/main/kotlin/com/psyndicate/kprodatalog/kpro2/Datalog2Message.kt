@@ -65,7 +65,9 @@ data class Datalog2Message(
         Description: Fuel Status
         Enum:  Open loop, cold = 1, Closed loop = 2, Open loop = 4
     */
-    val FST: UByte = 0u
+    val FST: UByte = 0u,
+
+    override var checksum: Byte = 0
 ) : Message {
     companion object {
         const val KPRO_OPEN_COLD = 1
@@ -76,6 +78,7 @@ data class Datalog2Message(
     }
 
     override val size: Int get() = MSG_SIZE
+    override val id: Byte get() = MessageType.Datalog2.id
 }
 
 @ExperimentalUnsignedTypes

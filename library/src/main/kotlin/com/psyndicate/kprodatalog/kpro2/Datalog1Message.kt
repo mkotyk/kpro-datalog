@@ -69,9 +69,9 @@ data class Datalog1Message(
 
     /*
         Offset: 10 (Ah)
-        Notes: Not used for datalog, observed ranges from 8 to 136
+        Notes: Not used for datalog
     */
-    val notUsed: UByte = 0u,
+    override var checksum: Byte = 0,
 
     /*
         Offset: 11 (Bh)
@@ -318,6 +318,7 @@ data class Datalog1Message(
     }
 
     override val size: Int get() = MSG_SIZE
+    override val id: Byte get() = MessageType.Datalog1.id
 }
 
 @ExperimentalUnsignedTypes
@@ -389,8 +390,8 @@ fun KManagerDatalogFrame.toDatalog1Message(): Datalog1Message = Datalog1Message(
     IGN = ((ignition + 64.0) / 0.5).toInt().toUByte(),
     O2V = (o2Voltage / O2VOLTS).toInt().toUByte(),
     SO2 = (so2 / VOLTS).toInt().toUByte(),
-    PO2 = (lambda * HALF_SHORT).toInt().toUShort(),
-    TGT = (targetLambda * HALF_SHORT).toInt().toUShort(),
+    PO2 = ((1.0 / lambda) * HALF_SHORT).toInt().toUShort(),
+    TGT = ((1.0 / targetLambda) * HALF_SHORT).toInt().toUShort(),
     STT = (shortTermTrim / 0.78125 + 128.0).toInt().toUByte(),
     KNR = (knockRetard / 0.25).toInt().toUByte(),
     KNL = (knockLevelVolts / VOLTS).toInt().toUByte(),

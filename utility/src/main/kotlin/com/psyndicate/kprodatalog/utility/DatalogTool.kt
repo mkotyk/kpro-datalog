@@ -77,54 +77,32 @@ class DatalogTool(private val quiet: Boolean = false) : Closeable {
                 if (request > 0) {
                     when (request.toByte()) {
                         MessageType.Status.id -> {
-                            ByteBuffer
-                                .allocate(StatusMessage.MSG_SIZE + 3)
-                                .order(ByteOrder.LITTLE_ENDIAN)
-                                .put(request.toByte())
-                                .put(StatusMessage.MSG_SIZE.toByte())
-                                .encode(StatusMessage(online = true))
+                            StatusMessage(online = true).toByteArray()
                         }
                         MessageType.Datalog1.id -> {
                             if (datalogStartTime == null) {
                                 datalogStartTime = now
                             }
-                            ByteBuffer
-                                .allocate(Datalog1Message.MSG_SIZE + 3)
-                                .order(ByteOrder.LITTLE_ENDIAN)
-                                .put(request.toByte())
-                                .put(Datalog1Message.MSG_SIZE.toByte())
-                                .encode(frame.toDatalog1Message())
+                            frame.toDatalog1Message().toByteArray()
                         }
                         MessageType.Datalog2.id -> {
                             if (datalogStartTime == null) {
                                 datalogStartTime = now
                             }
-                            ByteBuffer
-                                .allocate(Datalog2Message.MSG_SIZE + 3)
-                                .order(ByteOrder.LITTLE_ENDIAN)
-                                .put(request.toByte())
-                                .put(Datalog2Message.MSG_SIZE.toByte())
-                                .encode(frame.toDatalog2Message())
+                            frame.toDatalog2Message().toByteArray()
                         }
                         MessageType.Datalog3.id -> {
                             if (datalogStartTime == null) {
                                 datalogStartTime = now
                             }
-                            ByteBuffer
-                                .allocate(Datalog3Message.MSG_SIZE + 3)
-                                .order(ByteOrder.LITTLE_ENDIAN)
-                                .put(request.toByte())
-                                .put(Datalog3Message.MSG_SIZE.toByte())
-                                .encode(frame.toDatalog3Message())
+                            frame.toDatalog3Message().toByteArray()
                         }
                         else -> {
                             println("Requested unknown message type [$request]")
                             null
                         }
                     }?.let { msg ->
-                        val msgArray = msg.array()
-                        msgArray[msgArray.size - 1] = (-msgArray.checksum(0, msgArray.size - 1)).toByte()
-                        ftdiDevice.outputStream.write(msgArray)
+                        ftdiDevice.outputStream.write(msg)
                     }
 
                     if (!quiet && datalogStartTime != null) {
@@ -271,13 +249,11 @@ class DatalogTool(private val quiet: Boolean = false) : Closeable {
                     injectorDuration
                 )
             )
-            print("IAT: %3.2f\u00B0C ECT: %3.2f\u00B0C BAT: %2.1f".format(IAT, ECT, batteryVoltage))
+            print("IAT: %3.2f\u00B0C ECT: %3.2f\u00B0C BAT: %2.1f ".format(IAT, ECT, batteryVoltage))
+            print("AF: %3.2f AFCMD: %3.2f O2V: %2.2f".format(lambda, targetLambda, o2Voltage))
             print("\r")
         }
     }
-
-    private fun ByteArray.checksum(offset: Int = 0, length: Int = this.size - offset): Int =
-        this.drop(offset).take(length).sum() and 0xFF
 
     override fun close() {
         ftdiDevice.close()
